@@ -11,9 +11,10 @@ use mod_perl 1.21;
 use Apache::Constants qw( OK DECLINED SERVER_ERROR);
 use Apache::File;
 use Apache::Log;
+use Data::Dumper;
 use strict;
 
-$Apache::DebugInfo::VERSION = '0.01';
+$Apache::DebugInfo::VERSION = '0.02';
 
 # set debug level
 #  0 - messages at info or debug log levels
@@ -139,6 +140,9 @@ sub match_ip {
   my $ip                = $r->connection->remote_ip;
 
   my $ip_list           = $r->dir_config('DebugIPList');
+
+  # return ok if there is no ip list to check against
+  return 1 unless $ip_list;
   
   my @ip_list           = split /\s+/, $ip_list;
 
@@ -386,34 +390,12 @@ sub pnotes {
   foreach my $field (sort keys %hash) {
 
     my $value = $hash{$field};
-    my $type = ref $value;
+    my $d = Data::Dumper->new([$value]);
 
-    if ($type eq 'SCALAR') {
-      print $fh "\t$field => $value\n";
-
-    } elsif ($type eq 'HASH') {
-      my %hash = %$value;
-      print $fh "\t$field =>\n";
-      foreach my $key (sort keys %hash) {
-        print $fh "\t\t   $key = $hash{$key}\n";
-      }
-
-    } elsif ($type eq 'ARRAY') {
-      my @array = @$value;
-      print $fh "\t$field => $array[0]\n";
-      for (my $i=1;$i < @array; $i++) {
-        print $fh "\t\t\t\t=> $array[$i]\n";
-      }
-
-    } elsif ($type) {
-      # we don't handle globs or other references yet...
-      print $fh "\t$field => $type thingy\n";
-
-    } else {
-      # pnotes is just holding a simple string
-      print $fh "\t$field => $value\n";
-    }
-      
+    $d->Pad("\t\t");
+    $d->Quotekeys(0);
+    $d->Terse(1);
+    print $fh "\t$field => " . $d->Dump;
   }
 
 #---------------------------------------------------------------------
@@ -604,11 +586,6 @@ Apache::DebugInfo - log various bits of per-request data
   
   Setting DebugInfo to Off has no effect on direct method calls.  
 
-  Currently, logging pnotes only goes 1 level deep - if pnotes holds,
-  say, a hash of hashes, only the main hash keys are logged.  Also, 
-  glob, object, and code references are not supported yet.  Both these
-  features may be supported in the future via Data::Dumper.
-
   Calling Apache::DebugInfo methods with 'PerlHandler' as an argument
   has been disabled - doing so gets your headers and script printed
   to the browser, so I thought I'd save the unaware from potential 
@@ -619,7 +596,7 @@ Apache::DebugInfo - log various bits of per-request data
 
 =head1 SEE ALSO
 
-  perl(1), mod_perl(1), Apache(3), Apache::Table(3)
+  perl(1), mod_perl(1), Apache(3)
 
 =head1 AUTHOR
 

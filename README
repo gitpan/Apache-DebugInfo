@@ -1,4 +1,4 @@
-NAME
+=head1 NAME
 
 Apache::DebugInfo - log various bits of per-request data 
 
@@ -124,11 +124,6 @@ FEATURES/BUGS
   
   Setting DebugInfo to Off has no effect on direct method calls.  
 
-  Currently, logging pnotes only goes 1 level deep - if pnotes holds,
-  say, a hash of hashes, only the main hash keys are logged.  Also, 
-  glob, object, and code references are not supported yet.  Both these
-  features may be supported in the future via Data::Dumper.
-
   Calling Apache::DebugInfo methods with 'PerlHandler' as an argument
   has been disabled - doing so gets your headers and script printed
   to the browser, so I thought I'd save the unaware from potential 
@@ -139,7 +134,7 @@ FEATURES/BUGS
 
 SEE ALSO
 
-  perl(1), mod_perl(1), Apache(3), Apache::Table(3)
+  perl(1), mod_perl(1), Apache(3)
 
 AUTHOR
 

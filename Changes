@@ -9,4 +9,12 @@ Revision history for Perl extension Apache::DebugInfo.
             Graham Barr
             René Seindal
         
+0.02  4.4.2000
+        - fixed bug in ip match that required an ip address
+          to check against
+        - added Data::Dumper support to pnotes - not as pretty
+          as the stuff before, but it now supports complex
+          data structures and is less bulky  
+          Suggested by René Seindal
+	- minor pod and documentation changes
 
