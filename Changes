@@ -1,0 +1,12 @@
+Revision history for Perl extension Apache::DebugInfo.
+
+0.01  4.3.2000
+	- original version
+        - many kudos and gratitude to those who offered
+          their suggestions and improvements prior to
+          the first release:
+            Ask Bjoern Hansen
+            Graham Barr
+            René Seindal
+        
+

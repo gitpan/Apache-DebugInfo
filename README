@@ -1,0 +1,154 @@
+NAME
+
+Apache::DebugInfo - log various bits of per-request data 
+
+SYNOPSIS
+
+  There are two ways to use this module...
+
+  1) using Apache::DebugInfo to control debugging automatically
+
+    httpd.conf:
+
+      PerlInitHandler Apache::DebugInfo
+      PerlSetVar      DebugInfo On
+
+      PerlSetVar      DebugHeadersIn On
+      PerlSetVar      DebugHeadersOut On
+      PerlSetVar      DebugNotes On
+      PerlSetVar      DebugPNotes On
+      PerlSetVar      DebugPID On
+ 
+      PerlSetVar      DebugIPList "1.2.3.4, 1.2.3."
+      PerlSetVar      DebugFile   "/path/to/debug_log"
+    
+  2) using Apache::DebugInfo on the fly
+    
+    in handler or script:
+
+      use Apache::DebugInfo;
+
+      my $r = shift;
+
+      my $debug_object = Apache::DebugInfo->new($r);
+ 
+      # dump $r->headers_in right now
+      $debug_object->headers_in;
+
+      # log $r->headers_out after the response goes to the client
+      $debug_object->headers_in('PerlCleanupHandler');
+
+      # log all the $r->pnotes at Fixup and at Cleanup
+      $debug_object->pnotes('PerlCleanupHandler','PerlFixupHandler');
+
+DESCRIPTION
+
+  Apache::DebugInfo offers the ability to monitor various bits of
+  per-request data.  Its functionality is similar to 
+  Apache::DumpHeaders while offering several additional features, 
+  including the ability to
+    - separate inbound from outbound HTTP headers
+    - view the contents of $r->notes and $r->pnotes
+    - view any of these at the various points in the request cycle
+    - add output for any request phase from a single entry point
+    - use as a PerlInitHandler or with direct method calls
+    - use partial IP addresses for filtering by IP
+    - offer a subclassable interface
+      
+
+  You can enable Apache::DebugInfo as a PerlInitHandler, in which
+  case it chooses what request phase to display the appropriate
+  data.  The output of data can be controlled by setting various
+  variables to On:
+
+    DebugInfo       - enable Apache::DebugLog handler
+
+    DebugPID        - calls pid() during request init
+    DebugHeadersIn  - calls headers_in() during request init
+
+    DebugHeadersOut - calls headers_out() during request cleanup
+    DebugNotes      - calls notes() during request cleanup
+    DebugPNotes     - calls pnotes() during request cleanup
+
+  Alternatively, you can control output activity on the fly by
+  calling Apache::DebugInfo methods directly (see METHODS below).
+
+  Additionally, the following variables hold special arguments:
+
+    DebugFile       - absolute path of file that will store the info
+                      defaults to STDERR (which is likely error_log)
+    DebugIPList     - a space delimited list of IP address for which
+                      data should be captured
+                      this can be a partial IP - 1.2.3 will match
+                      1.2.3.5 and 1.2.3.6
+               
+METHODS
+
+  Apache::DebugInfo provides an object oriented interface to allow you
+  to call the various methods from either a module, handler, or an
+  Apache::Registry script.
+
+  Constructor:
+    new($r) - create a new Apache::DebugInfo object
+              requires a valid Apache request object
+
+  Methods:
+    All methods can be called without any arguments, in which case
+    the associated data is logged immediately.  Optionally, each
+    can be called with a list (either explicitly or as an array) 
+    of Perl*Handlers, which will log the data during the appropriate
+    phase.  
+
+    headers_in()  - display all of the incoming HTTP headers
+ 
+    headers_out() - display all of the outgoing HTTP headers
+
+    notes()       - display all the strings set by $r->notes
+
+    pnotes()      - display all the variables set by $r->pnotes
+
+    pid()         - display the process PID
+
+NOTES
+
+  Verbose debugging is enabled by setting the variable
+  $Apache::DebugInfo::DEBUG=1 to or greater.  To turn off all messages
+  set LogLevel above info.
+
+  This is alpha software, and as such has not been tested on multiple
+  platforms or environments.  It requires PERL_INIT=1, PERL_CLEANUP=1,
+  PERL_LOG_API=1, PERL_FILE_API=1, PERL_STACKED_HANDLERS=1, and maybe 
+  other hooks to function properly.
+
+FEATURES/BUGS
+  
+  Setting DebugInfo to Off has no effect on direct method calls.  
+
+  Currently, logging pnotes only goes 1 level deep - if pnotes holds,
+  say, a hash of hashes, only the main hash keys are logged.  Also, 
+  glob, object, and code references are not supported yet.  Both these
+  features may be supported in the future via Data::Dumper.
+
+  Calling Apache::DebugInfo methods with 'PerlHandler' as an argument
+  has been disabled - doing so gets your headers and script printed
+  to the browser, so I thought I'd save the unaware from potential 
+  pitfalls.
+
+  Phase misspellings, like 'PelrInitHandler' pass through without
+  warning, in case you were wondering where your output went...
+
+SEE ALSO
+
+  perl(1), mod_perl(1), Apache(3), Apache::Table(3)
+
+AUTHOR
+
+  Geoffrey Young <geoff@cpan.org>
+
+COPYRIGHT
+
+  Copyright 2000 Geoffrey Young - all rights reserved.
+
+  This library is free software; you can redistribute it and/or
+  modify it under the same terms as Perl itself.
+
