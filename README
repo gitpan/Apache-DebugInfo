@@ -1,6 +1,6 @@
-=head1 NAME
+NAME
 
-Apache::DebugInfo - log various bits of per-request data 
+  Apache::DebugInfo - log various bits of per-request data 
 
 SYNOPSIS
 
@@ -19,8 +19,9 @@ SYNOPSIS
       PerlSetVar      DebugPNotes On
       PerlSetVar      DebugPID On
  
-      PerlSetVar      DebugIPList "1.2.3.4, 1.2.3."
-      PerlSetVar      DebugFile   "/path/to/debug_log"
+      PerlSetVar      DebugFile     "/path/to/debug_log"
+      PerlSetVar      DebugIPList   "1.2.3.4, 1.2.4."
+      PerlSetVar      DebugTypeList ".html .cgi"
     
   2) using Apache::DebugInfo on the fly
     
@@ -31,6 +32,12 @@ SYNOPSIS
       my $r = shift;
 
       my $debug_object = Apache::DebugInfo->new($r);
+ 
+      # set the output file
+      $debug_object->file("/path/to/debug_log");
+ 
+      # get the ip addresses for which output is enabled
+      my $ip_list = $debug_object->ip;
  
       # dump $r->headers_in right now
       $debug_object->headers_in;
@@ -53,6 +60,7 @@ DESCRIPTION
     - add output for any request phase from a single entry point
     - use as a PerlInitHandler or with direct method calls
     - use partial IP addresses for filtering by IP
+    - use file type for filtering
     - offer a subclassable interface
       
 
@@ -63,25 +71,30 @@ DESCRIPTION
 
     DebugInfo       - enable Apache::DebugLog handler
 
-    DebugPID        - calls pid() during request init
-    DebugHeadersIn  - calls headers_in() during request init
+    DebugPID        - dumps apache child pid during request init
+    DebugHeadersIn  - dumps request headers_in during request init
 
-    DebugHeadersOut - calls headers_out() during request cleanup
-    DebugNotes      - calls notes() during request cleanup
-    DebugPNotes     - calls pnotes() during request cleanup
+    DebugHeadersOut - dumps request headers_out during request cleanup
+    DebugNotes      - dumps request notes during request cleanup
+    DebugPNotes     - dumps request pnotes during request cleanup
 
   Alternatively, you can control output activity on the fly by
   calling Apache::DebugInfo methods directly (see METHODS below).
 
-  Additionally, the following variables hold special arguments:
+  Additionally, the following optional variables hold special
+  arguments:
 
     DebugFile       - absolute path of file that will store the info
                       defaults to STDERR (which is likely error_log)
+
     DebugIPList     - a space delimited list of IP address for which
-                      data should be captured
+                      debugging is enabled
                       this can be a partial IP - 1.2.3 will match
                       1.2.3.5 and 1.2.3.6
-               
+
+    DebugTypeList   - a space delimited list of file extensions
+                      for which debugging is enabled
+
 METHODS
 
   Apache::DebugInfo provides an object oriented interface to allow you
@@ -89,25 +102,43 @@ METHODS
   Apache::Registry script.
 
   Constructor:
-    new($r) - create a new Apache::DebugInfo object
-              requires a valid Apache request object
+    new($r)       - create a new Apache::DebugInfo object
+                    requires a valid Apache request object
 
   Methods:
-    All methods can be called without any arguments, in which case
-    the associated data is logged immediately.  Optionally, each
+    The following methods can be called without any arguments, in which
+    case the associated data is output immediately.  Optionally, each
     can be called with a list (either explicitly or as an array) 
     of Perl*Handlers, which will log the data during the appropriate
     phase.  
 
-    headers_in()  - display all of the incoming HTTP headers
+    headers_in()  - display all the request incoming HTTP headers
  
-    headers_out() - display all of the outgoing HTTP headers
+    headers_out() - display all the request outgoing HTTP headers
 
-    notes()       - display all the strings set by $r->notes
+    notes()       - display all the request strings set by $r->notes
 
-    pnotes()      - display all the variables set by $r->pnotes
+    pnotes()      - display all the request variables set by $r->pnotes
 
-    pid()         - display the process PID
+    pid()         - display the apache child process PID
+
+    timestamp()   - display the current system time
+
+    There are also the following methods available for manipulating
+    the behavior of the above methods:
+
+    file($file)   - get or set the output file
+                    accepts an absolute filename as an argument
+                    returns the output filehandle
+                    overrides DebugFile above
+
+    ip($list)     - get or set the ip list
+                    accepts a space delimited list as an argument
+                    overrides DebugIPList above
+
+    type($type)   - get or set the file type list
+                    accepts a space delimited list as an argument
+                    overrides DebugTypeList above
 
 NOTES
 
@@ -123,6 +154,12 @@ NOTES
 FEATURES/BUGS
   
   Setting DebugInfo to Off has no effect on direct method calls.  
+
+  Once a debug handler is added to a given request phase, it can
+  no longer be controlled by ip(), or type(). file(), however, takes
+  affect on invocation.  This is becuase matching is done whenever
+  the handler is added to the stack, but the output file is used when
+  the handler is actually executed.
 
   Calling Apache::DebugInfo methods with 'PerlHandler' as an argument
   has been disabled - doing so gets your headers and script printed

@@ -14,7 +14,7 @@ use Apache::Log;
 use Data::Dumper;
 use strict;
 
-$Apache::DebugInfo::VERSION = '0.02';
+$Apache::DebugInfo::VERSION = '0.03';
 
 # set debug level
 #  0 - messages at info or debug log levels
@@ -26,8 +26,6 @@ sub handler {
 # this is kinda clunky, but we have to build in some intelligence
 # about where the various methods will do the most good
 # for those who don't get the apache request cycle
-#
-# do some preliminary stuff...
 #---------------------------------------------------------------------
   
   my $r           = shift;
@@ -35,34 +33,22 @@ sub handler {
 
   return OK unless $r->dir_config('DebugInfo') =~ m/On/i;
 
-  my (@inits, @cleanups);
-
-  push @inits, "headers_in" 
-    if $r->dir_config('DebugHeadersIn') =~ m/On/i;
-  push @inits, "pid" 
-    if $r->dir_config('DebugPID') =~ m/On/i;
-  push @cleanups, "notes" 
-    if $r->dir_config('DebugNotes') =~ m/On/i;
-  push @cleanups, "pnotes"
-    if $r->dir_config('DebugPNotes') =~ m/On/i;
-  push @cleanups, "headers_out" 
-    if $r->dir_config('DebugHeadersOut') =~ m/On/i;
-
   $log->info("Using Apache::DebugInfo") if $Apache::DebugLog::DEBUG;
 
-#---------------------------------------------------------------------
-# push the various debug routines onto the stack
-#---------------------------------------------------------------------
+  my $object = Apache::DebugInfo->new($r);
+  
+  $object->timestamp;
 
-  foreach my $phase (@inits) {
-    my $rc = push_on_stack($r, $phase, 'PerlInitHandler' );
-    return SERVER_ERROR if $rc;
-  }
-
-  foreach my $phase (@cleanups) {
-    my $rc = push_on_stack($r, $phase, 'PerlCleanupHandler');
-    return SERVER_ERROR if $rc;
-  }
+  $object->headers_in('PerlInitHandler') 
+    if $r->dir_config('DebugHeadersIn') =~ m/On/i;
+  $object->pid('PerlInitHandler') 
+    if $r->dir_config('DebugPID') =~ m/On/i;
+  $object->notes('PerlCleanupHandler') 
+    if $r->dir_config('DebugNotes') =~ m/On/i;
+  $object->pnotes('PerlCleanupHandler') 
+    if $r->dir_config('DebugPNotes') =~ m/On/i;
+  $object->headers_out('PerlCleanupHandler') 
+    if $r->dir_config('DebugHeadersOut') =~ m/On/i;
 
 #---------------------------------------------------------------------
 # wrap up...
@@ -78,24 +64,30 @@ sub new {
 # create a new Apache::DebugInfo object
 #---------------------------------------------------------------------
   
-  my ($class, $r) = @_;
+  my ($class, $r)       = @_;
 
-  my %self = {};
+  my %self              = ();
 
   my $log               = $r->server->log;
+
   $self{request}        = $r;
   $self{log}            = $log;
+
   $self{ip}             = $r->connection->remote_ip;
+  $self{uri}            = $r->uri;
+
+  $self{ip_list}        = $r->dir_config('DebugIPList');
+  $self{type_list}      = $r->dir_config('DebugTypeList');
 
   my $file              = $r->dir_config('DebugFile');
   
   $self{fh}             = Apache::File->new(">>$file") if $file;
 
   if ($file && !$self{fh}) {
-    $r->log_error("Cannot open file $file: $! using STDERR instead");
+    $r->log_error("Cannot open file $file - $! - using STDERR instead");
     $self{fh} = *STDERR;
   }
-  elsif (!$self{fh}) {
+  else {
     $log->info("\tno file specified - using STDERR for output")
       if $Apache::DebugInfo::DEBUG;
     $self{fh} = *STDERR;
@@ -109,21 +101,27 @@ sub new {
 sub push_on_stack {
 #---------------------------------------------------------------------
 # add the methods to the various Perl*Handler phases
+# this method is for internal use only
 #---------------------------------------------------------------------
 
-  my ($r, $debug, @phases) = @_;
+  my ($self, $debug, @phases) = @_;
 
-  my $object = Apache::DebugInfo->new($r);
+  my $r                       = $self->{request};
+  my $log                     = $self->{log};
+
+  unless ($self->match_ip && $self->match_type) {
+    $log->info("\trequest does not meet critera - skipping")
+      if $Apache::DebugInfo::DEBUG;
+    return;
+  }
 
   foreach my $phase (@phases) {
     # disable direct PerlHandler calls - it spits Registry scripts
     # to the browser...
     next if $phase =~ m/PerlHandler/;
 
-    $r->push_handlers($phase => sub {
-      $object->$debug();
-    });
-    $r->server->log->info("\t$phase debugging enabled for \$r->$debug")
+    $r->push_handlers($phase => sub { $self->$debug() });
+    $log->info("\t$phase debugging enabled for \$r->$debug")
       if $Apache::DebugInfo::DEBUG;
    }
    return;
@@ -132,21 +130,23 @@ sub push_on_stack {
 sub match_ip {
 #---------------------------------------------------------------------
 # see if the user's IP matches any given as DebugIPList
+# this method is for internal use only
 #---------------------------------------------------------------------
  
-  my $r                 = shift(@_);
+  my $self              = shift;
 
-  my $log               = $r->server->log;
-  my $ip                = $r->connection->remote_ip;
+  my $r                 = $self->{request};
+  my $log               = $self->{log};
+  my $ip                = $self->{ip};
 
-  my $ip_list           = $r->dir_config('DebugIPList');
+  my $ip_list           = $self->{ip_list};
 
-  # return ok if there is no ip list to check against
+  # return and continue if there is no ip list to check against
   return 1 unless $ip_list;
   
   my @ip_list           = split /\s+/, $ip_list;
 
-  my $total=0;
+  my $total             = 0;
 
   $log->info("\tchecking $ip against $ip_list")
      if $Apache::DebugInfo::DEBUG;
@@ -156,6 +156,119 @@ sub match_ip {
   }
 
   return $total;
+}
+
+sub match_type {
+#---------------------------------------------------------------------
+# see if the requested file matches any given in DebugTypeList
+# this method is for internal use only
+#---------------------------------------------------------------------
+ 
+  my $self              = shift;
+
+  my $r                 = $self->{request};
+  my $log               = $self->{log};
+  my $ip                = $self->{ip};
+  my $uri               = $self->{uri};
+
+  my $type_list         = $self->{type_list};
+
+  # return and continue if there is no type list to check against
+  return 1 unless $type_list;
+  
+  my @type_list         = split /\s+/, $type_list;
+
+  my $total             = 0;
+
+  $log->info("\tchecking $uri against $type_list")
+     if $Apache::DebugInfo::DEBUG;
+
+  foreach my $match (@type_list) {
+    $total++ if ($uri =~ m/\Q$match\E$/);
+  }
+
+  return $total;
+}
+
+sub ip {
+
+  my $self              = shift;
+ 
+  return $self->{ip_list} unless @_;
+
+  my $ip_list           = shift(@_);
+
+  my $log               = $self->{log};
+
+  $self->{ip_list}      = $ip_list;
+
+  $log->info("\twill check client ip address against $ip_list")
+     if $Apache::DebugInfo::DEBUG;
+
+  return undef;
+}
+
+sub type {
+
+  my $self              = shift;
+ 
+  return $self->{type_list} unless @_;
+
+  my $type_list         = shift(@_);
+
+  my $log               = $self->{log};
+
+  $self->{type_list}    = $type_list;
+
+  $log->info("\twill check requested uri against $type_list")
+     if $Apache::DebugInfo::DEBUG;
+
+  return undef;
+}
+
+sub file {
+
+  my $self              = shift;
+
+  return $self->{fh} unless @_;
+ 
+  my $file              = shift(@_);
+
+  my $r                 = $self->{request};
+  my $log               = $self->{log};
+
+  $self->{fh}           = Apache::File->new(">>$file");
+
+  if ($self->{fh}) {
+    $log->info("\tusing $file for output")
+       if $Apache::DebugInfo::DEBUG;
+  } else {
+    $r->log_error("Cannot open file $file - $! - using STDERR instead");
+    $self->{fh} = *STDERR;
+  }
+
+  return undef;
+}
+
+sub timestamp {
+
+  my $self              = shift;
+
+  my @phases            = @_;
+
+  my $log               = $self->{log};
+  my $fh                = $self->{fh};
+
+  if (@phases) {
+    push_on_stack($self, 'timestamp', @phases);
+    $log->info("Exiting Apache::DebugInfo::headers_in") 
+      if $Apache::DebugInfo::DEBUG;
+    return;
+  }
+
+  print $fh "\n**** Apache::DebugInfo - " . scalar(localtime) .  "\n"; 
+
+  return undef;
 }
 
 sub headers_in {
@@ -171,10 +284,7 @@ sub headers_in {
   my $log               = $self->{log};
   my $fh                = $self->{fh};
   my $ip                = $self->{ip};
-
-  my $uri               = $r->uri;
-
-  return unless match_ip($r);
+  my $uri               = $self->{uri};
 
   $log->info("Using Apache::DebugInfo::headers_in")
      if $Apache::DebugInfo::DEBUG;
@@ -184,8 +294,10 @@ sub headers_in {
 #---------------------------------------------------------------------
 
   if (@phases) {
-    push_on_stack($r, 'headers_in', @phases);
-    return 1;
+    push_on_stack($self, 'headers_in', @phases);
+    $log->info("Exiting Apache::DebugInfo::headers_in") 
+      if $Apache::DebugInfo::DEBUG;
+    return;
   }
 
 #---------------------------------------------------------------------
@@ -195,7 +307,7 @@ sub headers_in {
   my $headers_in = $r->headers_in;
 
   print $fh "\nDebug headers_in for [$ip] $uri during " .
-    $r->notes('PERL_CUR_HOOK') . "\n";
+    $r->current_callback . "\n";
 
   $headers_in->do(sub {
     my ($field, $value) = @_;
@@ -238,10 +350,7 @@ sub headers_out {
   my $log               = $self->{log};
   my $fh                = $self->{fh};
   my $ip                = $self->{ip};
-
-  my $uri               = $r->uri;
-
-  return unless match_ip($r);
+  my $uri               = $self->{uri};
 
   $log->info("Using Apache::DebugInfo::headers_out")
      if $Apache::DebugInfo::DEBUG;
@@ -251,8 +360,10 @@ sub headers_out {
 #---------------------------------------------------------------------
 
   if (@phases) {
-    push_on_stack($r, 'headers_out', @phases);
-    return 1;
+    push_on_stack($self, 'headers_out', @phases);
+    $log->info("Exiting Apache::DebugInfo::headers_out") 
+      if $Apache::DebugInfo::DEBUG;
+    return;
   }
 
 #---------------------------------------------------------------------
@@ -262,7 +373,7 @@ sub headers_out {
   my $headers_out = $r->headers_out;
 
   print $fh "\nDebug headers_out for [$ip] $uri during " .
-    $r->notes('PERL_CUR_HOOK') . "\n";
+    $r->current_callback . "\n";
 
   $headers_out->do(sub {
     my ($field, $value) = @_;
@@ -302,10 +413,7 @@ sub notes {
   my $log               = $self->{log};
   my $fh                = $self->{fh};
   my $ip                = $self->{ip};
-
-  my $uri               = $r->uri;
-
-  return unless match_ip($r);
+  my $uri               = $self->{uri};
 
   $log->info("Using Apache::DebugInfo::notes")
      if $Apache::DebugInfo::DEBUG;
@@ -315,8 +423,10 @@ sub notes {
 #---------------------------------------------------------------------
 
   if (@phases) {
-    push_on_stack($r, 'notes', @phases);
-    return 1;
+    push_on_stack($self, 'notes', @phases);
+    $log->info("Exiting Apache::DebugInfo::notes") 
+      if $Apache::DebugInfo::DEBUG;
+    return;
   }
 
 #---------------------------------------------------------------------
@@ -326,13 +436,11 @@ sub notes {
   my $notes = $r->notes;
 
   print $fh "\nDebug notes for [$ip] $uri during " .
-    $r->notes('PERL_CUR_HOOK') . "\n";
+    $r->current_callback . "\n";
 
   $notes->do(sub {
     my ($field, $value) = @_;
-    print $fh "\t$field => $value\n" unless 
-      ($field =~ m/PERL_CUR_HOOK/);  # skip this one since we just
-                                     # printed it...
+    print $fh "\t$field => $value\n";
     1;
   });   
 
@@ -359,10 +467,7 @@ sub pnotes {
   my $log               = $self->{log};
   my $fh                = $self->{fh};
   my $ip                = $self->{ip};
-
-  my $uri               = $r->uri;
-
-  return unless match_ip($r);
+  my $uri               = $self->{uri};
 
   $log->info("Using Apache::DebugInfo::pnotes")
      if $Apache::DebugInfo::DEBUG;
@@ -372,8 +477,10 @@ sub pnotes {
 #---------------------------------------------------------------------
 
   if (@phases) {
-    push_on_stack($r, 'pnotes', @phases);
-    return 1;
+    push_on_stack($self, 'pnotes', @phases);
+    $log->info("Exiting Apache::DebugInfo::pnotes") 
+      if $Apache::DebugInfo::DEBUG;
+    return;
   }
 
 #---------------------------------------------------------------------
@@ -383,7 +490,7 @@ sub pnotes {
   my $pnotes = $r->pnotes;
 
   print $fh "\nDebug pnotes for [$ip] $uri during " .
-    $r->notes('PERL_CUR_HOOK') . "\n";
+    $r->current_callback . "\n";
 
   my %hash = %$pnotes;
 
@@ -393,6 +500,7 @@ sub pnotes {
     my $d = Data::Dumper->new([$value]);
 
     $d->Pad("\t\t");
+    $d->Indent(1);
     $d->Quotekeys(0);
     $d->Terse(1);
     print $fh "\t$field => " . $d->Dump;
@@ -422,10 +530,7 @@ sub pid {
   my $log               = $self->{log};
   my $fh                = $self->{fh};
   my $ip                = $self->{ip};
-
-  my $uri               = $r->uri;
-
-  return unless match_ip($r);
+  my $uri               = $self->{uri};
 
   $log->info("Using Apache::DebugInfo::pid")
      if $Apache::DebugInfo::DEBUG;
@@ -435,16 +540,18 @@ sub pid {
 #---------------------------------------------------------------------
 
   if (@phases) {
-    push_on_stack($r, 'pid', @phases);
-    return 1;
+    push_on_stack($self, 'pid', @phases);
+    $log->info("Exiting Apache::DebugInfo::pid") 
+      if $Apache::DebugInfo::DEBUG;
+    return;
   }
 
 #---------------------------------------------------------------------
 # otherwise, just print the pid
 #---------------------------------------------------------------------
 
-  print $fh "\nDebug pnotes for [$ip] $uri during " .
-    $r->notes('PERL_CUR_HOOK') . "\n\t$$\n";
+  print $fh "\nDebug pid for [$ip] $uri during " .
+    $r->current_callback . "\n\t$$\n";
 
 #---------------------------------------------------------------------
 # wrap up...
@@ -462,7 +569,7 @@ __END__
 
 =head1 NAME
 
-Apache::DebugInfo - log various bits of per-request data 
+  Apache::DebugInfo - log various bits of per-request data 
 
 =head1 SYNOPSIS
 
@@ -481,8 +588,9 @@ Apache::DebugInfo - log various bits of per-request data
       PerlSetVar      DebugPNotes On
       PerlSetVar      DebugPID On
  
-      PerlSetVar      DebugIPList "1.2.3.4, 1.2.3."
-      PerlSetVar      DebugFile   "/path/to/debug_log"
+      PerlSetVar      DebugFile     "/path/to/debug_log"
+      PerlSetVar      DebugIPList   "1.2.3.4, 1.2.4."
+      PerlSetVar      DebugTypeList ".html .cgi"
     
   2) using Apache::DebugInfo on the fly
     
@@ -493,6 +601,12 @@ Apache::DebugInfo - log various bits of per-request data
       my $r = shift;
 
       my $debug_object = Apache::DebugInfo->new($r);
+ 
+      # set the output file
+      $debug_object->file("/path/to/debug_log");
+ 
+      # get the ip addresses for which output is enabled
+      my $ip_list = $debug_object->ip;
  
       # dump $r->headers_in right now
       $debug_object->headers_in;
@@ -515,6 +629,7 @@ Apache::DebugInfo - log various bits of per-request data
     - add output for any request phase from a single entry point
     - use as a PerlInitHandler or with direct method calls
     - use partial IP addresses for filtering by IP
+    - use file type for filtering
     - offer a subclassable interface
       
 
@@ -525,25 +640,30 @@ Apache::DebugInfo - log various bits of per-request data
 
     DebugInfo       - enable Apache::DebugLog handler
 
-    DebugPID        - calls pid() during request init
-    DebugHeadersIn  - calls headers_in() during request init
+    DebugPID        - dumps apache child pid during request init
+    DebugHeadersIn  - dumps request headers_in during request init
 
-    DebugHeadersOut - calls headers_out() during request cleanup
-    DebugNotes      - calls notes() during request cleanup
-    DebugPNotes     - calls pnotes() during request cleanup
+    DebugHeadersOut - dumps request headers_out during request cleanup
+    DebugNotes      - dumps request notes during request cleanup
+    DebugPNotes     - dumps request pnotes during request cleanup
 
   Alternatively, you can control output activity on the fly by
   calling Apache::DebugInfo methods directly (see METHODS below).
 
-  Additionally, the following variables hold special arguments:
+  Additionally, the following optional variables hold special
+  arguments:
 
     DebugFile       - absolute path of file that will store the info
                       defaults to STDERR (which is likely error_log)
+
     DebugIPList     - a space delimited list of IP address for which
-                      data should be captured
+                      debugging is enabled
                       this can be a partial IP - 1.2.3 will match
                       1.2.3.5 and 1.2.3.6
-               
+
+    DebugTypeList   - a space delimited list of file extensions
+                      for which debugging is enabled
+
 =head1 METHODS
 
   Apache::DebugInfo provides an object oriented interface to allow you
@@ -551,25 +671,43 @@ Apache::DebugInfo - log various bits of per-request data
   Apache::Registry script.
 
   Constructor:
-    new($r) - create a new Apache::DebugInfo object
-              requires a valid Apache request object
+    new($r)       - create a new Apache::DebugInfo object
+                    requires a valid Apache request object
 
   Methods:
-    All methods can be called without any arguments, in which case
-    the associated data is logged immediately.  Optionally, each
+    The following methods can be called without any arguments, in which
+    case the associated data is output immediately.  Optionally, each
     can be called with a list (either explicitly or as an array) 
     of Perl*Handlers, which will log the data during the appropriate
     phase.  
 
-    headers_in()  - display all of the incoming HTTP headers
+    headers_in()  - display all the request incoming HTTP headers
  
-    headers_out() - display all of the outgoing HTTP headers
+    headers_out() - display all the request outgoing HTTP headers
 
-    notes()       - display all the strings set by $r->notes
+    notes()       - display all the request strings set by $r->notes
 
-    pnotes()      - display all the variables set by $r->pnotes
+    pnotes()      - display all the request variables set by $r->pnotes
 
-    pid()         - display the process PID
+    pid()         - display the apache child process PID
+
+    timestamp()   - display the current system time
+
+    There are also the following methods available for manipulating
+    the behavior of the above methods:
+
+    file($file)   - get or set the output file
+                    accepts an absolute filename as an argument
+                    returns the output filehandle
+                    overrides DebugFile above
+
+    ip($list)     - get or set the ip list
+                    accepts a space delimited list as an argument
+                    overrides DebugIPList above
+
+    type($type)   - get or set the file type list
+                    accepts a space delimited list as an argument
+                    overrides DebugTypeList above
 
 =head1 NOTES
 
@@ -585,6 +723,12 @@ Apache::DebugInfo - log various bits of per-request data
 =head1 FEATURES/BUGS
   
   Setting DebugInfo to Off has no effect on direct method calls.  
+
+  Once a debug handler is added to a given request phase, it can
+  no longer be controlled by ip(), or type(). file(), however, takes
+  affect on invocation.  This is becuase matching is done whenever
+  the handler is added to the stack, but the output file is used when
+  the handler is actually executed.
 
   Calling Apache::DebugInfo methods with 'PerlHandler' as an argument
   has been disabled - doing so gets your headers and script printed
