@@ -3,4 +3,4 @@ DebugInfo.pm
 MANIFEST
 Makefile.PL
 README
-test.pl
+t/version.t
