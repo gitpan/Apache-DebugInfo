@@ -69,7 +69,7 @@ DESCRIPTION
   data.  The output of data can be controlled by setting various
   variables to On:
 
-    DebugInfo       - enable Apache::DebugLog handler
+    DebugInfo       - enable Apache::DebugInfo handler
 
     DebugPID        - dumps apache child pid during request init
     DebugHeadersIn  - dumps request headers_in during request init
@@ -136,7 +136,7 @@ METHODS
                     accepts a space delimited list as an argument
                     overrides DebugIPList above
 
-    type($type)   - get or set the file type list
+    type($list)   - get or set the file type list
                     accepts a space delimited list as an argument
                     overrides DebugTypeList above
 

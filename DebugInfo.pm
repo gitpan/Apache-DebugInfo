@@ -14,7 +14,7 @@ use Apache::Log;
 use Data::Dumper;
 use strict;
 
-$Apache::DebugInfo::VERSION = '0.03';
+$Apache::DebugInfo::VERSION = '0.04';
 
 # set debug level
 #  0 - messages at info or debug log levels
@@ -32,8 +32,8 @@ sub handler {
   my $log         = $r->server->log;
 
   return OK unless $r->dir_config('DebugInfo') =~ m/On/i;
-
-  $log->info("Using Apache::DebugInfo") if $Apache::DebugLog::DEBUG;
+ 
+  $log->info("Using Apache::DebugInfo") if $Apache::DebugInfo::DEBUG;
 
   my $object = Apache::DebugInfo->new($r);
   
@@ -54,7 +54,7 @@ sub handler {
 # wrap up...
 #---------------------------------------------------------------------
 
-  $log->info("Exiting Apache::DebugInfo") if $Apache::DebugLog::DEBUG;
+  $log->info("Exiting Apache::DebugInfo") if $Apache::DebugInfo::DEBUG;
 
   return OK;
 }
@@ -84,8 +84,12 @@ sub new {
   $self{fh}             = Apache::File->new(">>$file") if $file;
 
   if ($file && !$self{fh}) {
-    $r->log_error("Cannot open file $file - $! - using STDERR instead");
+    $r->log_error("Can't open $file - $! - using STDERR instead");
     $self{fh} = *STDERR;
+  }
+  elsif ($self{fh}) {
+    $log->info("\tusing $file for output") 
+      if $Apache::DebugInfo::DEBUG;
   }
   else {
     $log->info("\tno file specified - using STDERR for output")
@@ -191,6 +195,10 @@ sub match_type {
 }
 
 sub ip {
+#---------------------------------------------------------------------
+# get or set the ip addresses or subnets for which output will
+# be generated
+#---------------------------------------------------------------------
 
   my $self              = shift;
  
@@ -209,6 +217,9 @@ sub ip {
 }
 
 sub type {
+#---------------------------------------------------------------------
+# get or set the file extensions for which output will be generated
+#---------------------------------------------------------------------
 
   my $self              = shift;
  
@@ -227,6 +238,9 @@ sub type {
 }
 
 sub file {
+#---------------------------------------------------------------------
+# get or set the output file
+#---------------------------------------------------------------------
 
   my $self              = shift;
 
@@ -251,6 +265,9 @@ sub file {
 }
 
 sub timestamp {
+#---------------------------------------------------------------------
+# print a timestamp to STDOUT
+#---------------------------------------------------------------------
 
   my $self              = shift;
 
@@ -266,7 +283,7 @@ sub timestamp {
     return;
   }
 
-  print $fh "\n**** Apache::DebugInfo - " . scalar(localtime) .  "\n"; 
+  print $fh "\n**** Apache::DebugInfo - " . scalar(localtime) . "\n"; 
 
   return undef;
 }
@@ -638,7 +655,7 @@ __END__
   data.  The output of data can be controlled by setting various
   variables to On:
 
-    DebugInfo       - enable Apache::DebugLog handler
+    DebugInfo       - enable Apache::DebugInfo handler
 
     DebugPID        - dumps apache child pid during request init
     DebugHeadersIn  - dumps request headers_in during request init
@@ -705,7 +722,7 @@ __END__
                     accepts a space delimited list as an argument
                     overrides DebugIPList above
 
-    type($type)   - get or set the file type list
+    type($list)   - get or set the file type list
                     accepts a space delimited list as an argument
                     overrides DebugTypeList above
 

@@ -33,3 +33,7 @@ Revision history for Perl extension Apache::DebugInfo.
             o fixed some unititialized variable warnings 
             o added suggested timestamp() and supporting documentation
 
+0.04  4.19.2000
+        - fixed bug in constructor that didn't set the output file 
+          to match DebugFile variable
+        - minor documentation and pod changes and additions
